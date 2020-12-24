@@ -70,9 +70,9 @@ public class SCMContext implements EventHandler<SafeModeStatus> {
   private final StorageContainerManager scm;
   private final Lock lock = new ReentrantLock();
 
-  private SCMContext(boolean isLeader, long term,
-                     final SafeModeStatus safeModeStatus,
-                     final StorageContainerManager scm) {
+  SCMContext(boolean isLeader, long term,
+             final SafeModeStatus safeModeStatus,
+             final StorageContainerManager scm) {
     this.isLeader = isLeader;
     this.termOpt = OptionalLong.of(term);
     this.safeModeStatus = safeModeStatus;
