@@ -18,7 +18,10 @@
 package org.apache.hadoop.hdds.scm.ha;
 
 import com.google.common.base.Preconditions;
+import org.apache.hadoop.hdds.scm.safemode.SCMSafeModeManager.SafeModeStatus;
 import org.apache.hadoop.hdds.scm.server.StorageContainerManager;
+import org.apache.hadoop.hdds.server.events.EventHandler;
+import org.apache.hadoop.hdds.server.events.EventPublisher;
 import org.apache.ratis.proto.RaftProtos;
 import org.apache.ratis.protocol.RaftGroupId;
 import org.apache.ratis.protocol.exceptions.NotLeaderException;
@@ -40,11 +43,11 @@ import java.util.concurrent.locks.ReentrantLock;
  *  - RaftServer related info, e.g., isLeader, term.
  *  - SafeMode related info, e.g., inSafeMode, preCheckComplete.
  */
-public class SCMContext {
+public class SCMContext implements EventHandler<SafeModeStatus> {
   private static final Logger LOG = LoggerFactory.getLogger(SCMContext.class);
 
   private static final SCMContext EMPTY_CONTEXT
-      = new SCMContext(true, 0, null);
+      = new SCMContext(true, 0, new SafeModeStatus(false, true), null);
 
   /**
    * Used by non-HA mode SCM, Recon and Unit Tests.
@@ -53,15 +56,26 @@ public class SCMContext {
     return EMPTY_CONTEXT;
   }
 
+  /**
+   * Raft related info.
+   */
   private boolean isLeader;
   private OptionalLong termOpt;
+
+  /**
+   * Safe mode related info.
+   */
+  private SafeModeStatus safeModeStatus;
+
   private final StorageContainerManager scm;
   private final Lock lock = new ReentrantLock();
 
   private SCMContext(boolean isLeader, long term,
+                     final SafeModeStatus safeModeStatus,
                      final StorageContainerManager scm) {
     this.isLeader = isLeader;
     this.termOpt = OptionalLong.of(term);
+    this.safeModeStatus = safeModeStatus;
     this.scm = scm;
   }
 
@@ -69,7 +83,7 @@ public class SCMContext {
    * Creates SCMContext instance from StorageContainerManager.
    */
   public SCMContext(final StorageContainerManager scm) {
-    this(false, 0, scm);
+    this(false, 0, new SafeModeStatus(true, false), scm);
     Preconditions.checkNotNull(scm, "scm is null");
   }
 
@@ -148,6 +162,37 @@ public class SCMContext {
 
       termOpt = OptionalLong.of(term);
       return termOpt.getAsLong();
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  @Override
+  public void onMessage(SafeModeStatus status,
+                        EventPublisher publisher) {
+    lock.lock();
+    try {
+      LOG.info("Update SafeModeStatus from {} to {}.",
+          this.safeModeStatus, status);
+      this.safeModeStatus = status;
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  public boolean isInSafeMode() {
+    lock.lock();
+    try {
+      return safeModeStatus.isInSafeMode();
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  public boolean isPreCheckComplete() {
+    lock.lock();
+    try {
+      return safeModeStatus.isPreCheckComplete();
     } finally {
       lock.unlock();
     }
